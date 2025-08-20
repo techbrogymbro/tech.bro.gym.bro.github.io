@@ -15,7 +15,6 @@
     header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
     h1{font-size:1.25rem;margin:0;font-weight:700;letter-spacing:.2px}
     .pill{font-size:.8rem;color:var(--muted)}
-    .header-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 
     .card{background:var(--card);border:1px solid #1f2530;border-radius:18px;padding:14px 14px;box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 14px 30px rgba(0,0,0,.4)}
     .summary{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -69,10 +68,7 @@
   <div class="app" id="app">
     <header>
       <h1>Day Timer</h1>
-      <div class="header-right">
-        <div class="pill" id="syncStatus">Sync: connecting…</div>
-        <div class="pill" id="todayStr"></div>
-      </div>
+      <div class="pill" id="todayStr"></div>
     </header>
 
     <div class="card summary">
@@ -115,12 +111,13 @@
 
   <!-- Entire app + public Firebase Realtime Database sync -->
   <script type="module">
-    // Firebase modular CDN imports
+    /* Firebase v10 modular CDN imports (works on GitHub Pages) */
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-    import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+    import { getDatabase, ref, onValue, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
     (function(){
       const $=s=>document.querySelector(s);
+      const appEl=$('#app');
       const grid=$('#grid');
       const remainingEl=$('#remaining');
       const trackedEl=$('#tracked');
@@ -131,9 +128,6 @@
       const endDayBtn=$('#endDayBtn');
       const newActEl=$('#newAct');
       const addBtn=$('#addBtn');
-      const syncStatusEl=$('#syncStatus');
-
-      function setSyncStatus(text){ syncStatusEl.textContent = text; }
 
       const DEFAULTS={
         budgetHours:16,
@@ -167,19 +161,13 @@
               budgetHours:DEFAULTS.budgetHours,
               confirmOnSwitch:DEFAULTS.confirmOnSwitch,
               activities:Object.fromEntries(DEFAULTS.activities.map(n=>[n,{accumMs:0}])),
-              running:null,
-              history:[],
-              _updatedAt: Date.now() // ensure present for first sync
+              running:null, // {name,startTs}
+              history:[]
             };
             localStorage.setItem('daytimer:v1',JSON.stringify(init));
             return init;
           }
-          try{
-            const parsed = JSON.parse(raw);
-            if (parsed && !parsed._updatedAt) parsed._updatedAt = Date.now();
-            localStorage.setItem('daytimer:v1', JSON.stringify(parsed));
-            return parsed;
-          }catch(e){
+          try{return JSON.parse(raw)}catch(e){
             localStorage.removeItem('daytimer:v1');
             return store.load();
           }
@@ -269,7 +257,7 @@
               <button class="${isActive?'danger':'primary'}" aria-pressed="${isActive}" aria-label="${isActive?'Stop':'Start'} ${name}">${isActive?'Switch away':'Start'}</button>
             </div>`;
 
-          // Drag events
+          // Drag events for each tile
           tile.addEventListener('dragstart', (e)=>{
             dragName=name;
             e.dataTransfer.effectAllowed='move';
@@ -316,22 +304,27 @@
         }
       }
 
-      // Precise confirm-on-switch
+      // Precise confirm-on-switch: keep timing until AFTER user confirms
       function startActivity(name){
         ensureDay();
 
         if(state.running){
-          if(state.running.name===name){ return; }
+          if(state.running.name===name){
+            // Already running -> do nothing
+            return;
+          }
 
           if(state.confirmOnSwitch){
             const ok=confirm(`Switch from “${state.running.name}” to “${name}”?`);
             if(!ok) return;
+            // compute 'now' AFTER confirmation so previous keeps accruing time until you click OK
             const now=Date.now();
             const cur=state.running;
             const rec=state.activities[cur.name];
             if(rec){ rec.accumMs += now - cur.startTs; }
             state.running={name, startTs: now};
           } else {
+            // immediate switch
             const now=Date.now();
             const cur=state.running;
             const rec=state.activities[cur.name];
@@ -376,7 +369,9 @@
             rows.push([date,budget,name,ms,fmt(ms)]);
           }
         }
-        for(const snap of state.history){ pushDay(snap.date,snap.budgetHours,snap.totals); }
+        for(const snap of state.history){
+          pushDay(snap.date,snap.budgetHours,snap.totals);
+        }
         const tempTotals={};
         for(const [n,r] of Object.entries(state.activities)){
           tempTotals[n]=r.accumMs + (state.running && state.running.name===n ? Date.now()-state.running.startTs : 0);
@@ -404,7 +399,7 @@
       });
       newActEl.addEventListener('keydown',e=>{ if(e.key==='Enter'){ addBtn.click(); }});
 
-      // Grid-level DnD targets
+      // Grid-level DnD targets (position based on tile you drop onto)
       grid.addEventListener('dragover',(e)=>{
         e.preventDefault();
         const over=e.target.closest('.tile');
@@ -427,10 +422,10 @@
         setActivitiesOrder(names);
       });
 
-      // ======== PUBLIC FIREBASE REALTIME DATABASE SYNC ========
-      // IMPORTANT: In Firebase Console, create a Realtime Database (any region)
-      // and set Rules to:
-      // { "rules": { ".read": true, ".write": true } }  (fully public)
+      // ======== PUBLIC FIREBASE REALTIME DATABASE SYNC (server-timestamp LWW) ========
+      // IMPORTANT: In Firebase Console, set Realtime Database Rules to:
+      // { "rules": { ".read": true, ".write": true } }  (fully public) — for demo only.
+      // Replace placeholders below with your project's values.
       const firebaseConfig = {
         apiKey: "AIzaSyD-m1Xp9DEZlfydD56HqW0fW7XbX3SUEPs",
         authDomain: "techbrogymbro-28da1.firebaseapp.com",
@@ -440,90 +435,64 @@
         messagingSenderId: "665948116205",
         appId: "1:665948116205:web:790786f65d7f51656f68e4"
       };
-      console.log("[FB] init with databaseURL:", firebaseConfig.databaseURL);
       const appFB = initializeApp(firebaseConfig);
       const db = getDatabase(appFB);
 
-      // Everyone shares this path. If you want your own namespace, change it (e.g. "daytimerPublic/myname").
-      const DB_PATH = "daytimerPublic";
+      // Simple channeling: open your page with the same #id on all devices to share a state space.
+      // e.g. https://username.github.io/yourpage/#my-sync-id
+      const SYNC_ID = (location.hash.replace(/^#/, '') || 'default').trim();
+      const DB_PATH = `daytimerPublic/${SYNC_ID}`;
       const dbRef = ref(db, DB_PATH);
 
       // Avoid echo loops when applying remote updates
       let applyingRemote = false;
 
-      // Debounced cloud writer
+      // Debounced cloud writer (uses serverTimestamp for consistent ordering across devices)
       let cloudTimer;
       function queueCloudSave(s){
         clearTimeout(cloudTimer);
         cloudTimer = setTimeout(() => {
-          set(dbRef, { state: s, updatedAt: Date.now() })
-            .then(()=>{ setSyncStatus("Sync: ok"); console.log("[FB] wrote state", s._updatedAt); })
-            .catch(err=>{
-              console.warn("[FB] write failed", err);
-              setSyncStatus("Sync: error (write)");
-            });
-        }, 250);
+          set(dbRef, { state: s, updatedAt: serverTimestamp() }).catch(console.warn);
+        }, 300);
       }
 
-      // Wrap local save to also push to cloud with last-write-wins
+      // Wrap local save to also push to cloud (no local clocks in state)
       const origSave = store.save;
       store.save = (s) => {
-        s._updatedAt = Date.now();
         origSave(s);
-        if (!applyingRemote) {
-          setSyncStatus("Sync: pending…");
-          queueCloudSave(s);
-        }
+        if (!applyingRemote) queueCloudSave(s);
       };
 
-      // Live updates; if remote empty, seed it
+      // Track last server timestamp we've applied (persisted across reloads)
+      let lastSeenServerTs = Number(localStorage.getItem('daytimer:lastSeenTs') || 0);
+
+      // First sync + live updates. If remote is empty, seed it.
       onValue(dbRef, (snap) => {
         const data = snap.val();
-        console.log("[FB] onValue", data);
-        if (!data){
-          setSyncStatus("Sync: seeding…");
-          queueCloudSave(state);
-          return;
-        }
+        if (!data){ queueCloudSave(state); return; }
+
         const remote = data.state;
-        if (!remote) return;
+        // If someone wrote without updatedAt (older code), treat as 0 so we still apply once.
+        const remoteTs = typeof data.updatedAt === 'number' ? data.updatedAt : 0;
 
-        const localUpdated = state?._updatedAt || 0;
-        const remoteUpdated = remote?._updatedAt || 0;
+        // Only apply if server says it's newer than what we've already applied
+        if (remoteTs <= lastSeenServerTs) return;
 
-        if (remoteUpdated > localUpdated) {
-          console.log("[FB] adopting remote", { remoteUpdated, localUpdated });
-          applyingRemote = true;
-          remote._updatedAt = remoteUpdated || Date.now();
-          localStorage.setItem('daytimer:v1', JSON.stringify(remote));
-          state = remote;
-          render();
-          applyingRemote = false;
-          setSyncStatus("Sync: ok (updated)");
-        } else {
-          setSyncStatus("Sync: ok");
-        }
-      }, (err)=>{
-        console.warn("[FB] onValue error", err);
-        setSyncStatus("Sync: error (listen)");
+        applyingRemote = true;
+        localStorage.setItem('daytimer:v1', JSON.stringify(remote));
+        state = remote;
+        render();
+        applyingRemote = false;
+
+        lastSeenServerTs = remoteTs;
+        localStorage.setItem('daytimer:lastSeenTs', String(lastSeenServerTs));
       });
-
-      // Network indicators
-      window.addEventListener('online', ()=> setSyncStatus("Sync: online"));
-      window.addEventListener('offline', ()=> setSyncStatus("Sync: offline"));
-
-      // Expose a tiny debug helper
-      window.DayTimerDebug = {
-        pushNow(){ store.save(state); },
-        state(){ return JSON.parse(localStorage.getItem('daytimer:v1')); },
-        path: DB_PATH
-      };
       // ======== END FIREBASE SYNC ========
 
       // Ticker for live UI updates
       setInterval(()=>{ render(); },1000);
 
-      // First render
+      // First render (after Firebase hooks)
       render();
 
       // First-run hint
