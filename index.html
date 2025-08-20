@@ -113,7 +113,7 @@
   <script type="module">
     /* Firebase v10 modular CDN imports (works on GitHub Pages) */
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-    import { getDatabase, ref, onValue, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
+    import { getDatabase, ref, onValue, set, serverTimestamp, enableLogging } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js";
 
     (function(){
       const $=s=>document.querySelector(s);
@@ -440,9 +440,13 @@
 
       // Simple channeling: open your page with the same #id on all devices to share a state space.
       // e.g. https://username.github.io/yourpage/#my-sync-id
-      const SYNC_ID = (location.hash.replace(/^#/, '') || 'default').trim();
-      const DB_PATH = `daytimerPublic/${SYNC_ID}`;
+      const params = new URLSearchParams(location.search);
+      const SYNC_ID = (params.get('id') || location.hash.slice(1) || 'default').trim().toLowerCase(); // room id      const DB_PATH = `daytimerPublic/${SYNC_ID}`;
       const dbRef = ref(db, DB_PATH);
+
+      // Helpful logs
+      enableLogging(true); // see reads/writes in console
+      console.log('Room id:', SYNC_ID, 'DB path:', DB_PATH);
 
       // Avoid echo loops when applying remote updates
       let applyingRemote = false;
@@ -464,7 +468,9 @@
       };
 
       // Track last server timestamp we've applied (persisted across reloads)
-      let lastSeenServerTs = Number(localStorage.getItem('daytimer:lastSeenTs') || 0);
+      // Scope "last seen" to the room so switching rooms doesn't suppress updates
+      const LAST_KEY = `daytimer:lastSeenTs:${SYNC_ID}`;
+      let lastSeenServerTs = Number(localStorage.getItem(LAST_KEY) || 0);
 
       // First sync + live updates. If remote is empty, seed it.
       onValue(dbRef, (snap) => {
@@ -476,7 +482,9 @@
         const remoteTs = typeof data.updatedAt === 'number' ? data.updatedAt : 0;
 
         // Only apply if server says it's newer than what we've already applied
-        if (remoteTs <= lastSeenServerTs) return;
+        // Apply if it's newer OR the state is different (saves you from rare equal-timestamp drops)
+        const isDifferent = JSON.stringify(remote) !== JSON.stringify(state);
+        if (remoteTs <= lastSeenServerTs && !isDifferent) return;
 
         applyingRemote = true;
         localStorage.setItem('daytimer:v1', JSON.stringify(remote));
@@ -485,7 +493,7 @@
         applyingRemote = false;
 
         lastSeenServerTs = remoteTs;
-        localStorage.setItem('daytimer:lastSeenTs', String(lastSeenServerTs));
+        localStorage.setItem(LAST_KEY, String(lastSeenServerTs));
       });
       // ======== END FIREBASE SYNC ========
 
