@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Day Timer — Single‑Tap Switch</title>
+  <style>
+    :root{
+      --bg:#0f1216;--card:#151920;--muted:#97a3b6;--text:#e7edf7;--accent:#4e9eff;--danger:#ff6b6b;--good:#3ddc97;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0d1117,#0f141b);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif}
+    .app{max-width:820px;margin:0 auto;padding:20px 16px 40px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+    h1{font-size:1.25rem;margin:0;font-weight:700;letter-spacing:.2px}
+    .pill{font-size:.8rem;color:var(--muted)}
+
+    .card{background:var(--card);border:1px solid #1f2530;border-radius:18px;padding:14px 14px;box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 14px 30px rgba(0,0,0,.4)}
+    .summary{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .summary .box{padding:12px;border-radius:14px;background:#11161d;border:1px solid #1e2430}
+    .summary .k{font-size:.8rem;color:var(--muted);letter-spacing:.2px}
+    .summary .v{font-size:1.6rem;font-weight:800;margin-top:4px}
+    .summary .v.negative{color:var(--danger)}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .spacer{flex:1}
+
+    .controls{margin-top:14px;display:flex;flex-wrap:wrap;gap:10px}
+    button{appearance:none;border:none;background:#122134;color:var(--text);padding:12px 14px;border-radius:14px;font-weight:700;letter-spacing:.1px;box-shadow:0 2px 0 rgba(255,255,255,.03) inset,0 10px 24px rgba(0,0,0,.35);outline:none}
+    button:active{transform:translateY(1px)}
+    .primary{background:linear-gradient(180deg,#1f6feb,#1366e2);}
+    .danger{background:linear-gradient(180deg,#d64040,#b13434)}
+    .ghost{background:#0f1a28;border:1px solid #1f2a3a;color:#dce6f6}
+
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+    @media(min-width:520px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+    @media(min-width:760px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));}}
+
+    .tile{position:relative;border:1px solid #212a39;background:linear-gradient(180deg,#0e1725,#0b1520);padding:12px 12px;border-radius:16px;display:flex;flex-direction:column;gap:8px;min-height:90px}
+    .name{font-weight:800}
+    .elapsed{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.1rem}
+    .tile .row{justify-content:space-between}
+    .badge{font-size:.72rem;color:#bcd0f2}
+    .active{outline:2px solid var(--accent);box-shadow:0 0 0 3px rgba(78,158,255,.2)}
+    .dot{width:10px;height:10px;border-radius:999px;background:var(--accent);box-shadow:0 0 0 6px rgba(78,158,255,.18)}
+    .pulse{position:absolute;top:10px;right:10px;width:10px;height:10px;border-radius:999px;background:var(--accent);box-shadow:0 0 0 0 rgba(78,158,255,.5);animation:pulse 2s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(78,158,255,.5)}70%{box-shadow:0 0 0 12px rgba(78,158,255,0)}100%{box-shadow:0 0 0 0 rgba(78,158,255,0)}}
+
+    .muted{color:var(--muted)}
+    .tiny{font-size:.78rem}
+    .section-title{margin:18px 0 10px;font-size:.95rem;color:#b9c7db;letter-spacing:.3px}
+
+    input[type="text"], input[type="number"], .toggle-wrap{background:#0f1a28;border:1px solid #1f2a3a;color:var(--text);padding:10px 12px;border-radius:12px}
+    input[type="number"]{width:5.5em}
+    label{font-size:.85rem;color:#b7c5da}
+    .toggle{width:42px;height:24px;border-radius:100px;background:#203147;position:relative;display:inline-block;vertical-align:middle;margin:0 8px;cursor:pointer}
+    .toggle i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s ease}
+    .toggle.on{background:#2b7bf5}
+    .toggle.on i{transform:translateX(18px)}
+
+    footer{margin-top:20px;color:#93a6bf;font-size:.8rem;text-align:center}
+    a{color:#9ec3ff}
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <h1>Day Timer</h1>
+      <div class="pill" id="todayStr"></div>
+    </header>
+
+    <div class="card summary">
+      <div class="box">
+        <div class="k">Remaining today</div>
+        <div class="v" id="remaining" aria-live="polite">—</div>
+      </div>
+      <div class="box">
+        <div class="k">Tracked today</div>
+        <div class="v" id="tracked">—</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="row" style="gap:8px">
+        <label for="budget">Daily budget (hours)</label>
+        <input id="budget" type="number" min="1" max="24" step="0.5"/>
+      </div>
+      <div class="row" style="gap:8px;align-items:center">
+        <label>Confirm on switch</label>
+        <span class="toggle-wrap"><span id="confirmToggle" class="toggle"><i></i></span></span>
+      </div>
+      <span class="spacer"></span>
+      <button class="primary" id="endDayBtn" title="Archive today and stop">End Day</button>
+      <button class="ghost" id="exportBtn" title="Export history CSV">Export CSV</button>
+    </div>
+
+    <div class="section-title">Activities</div>
+    <div class="grid" id="grid"></div>
+
+    <div class="controls">
+      <input id="newAct" type="text" placeholder="Add activity (e.g., Breakfast)"/>
+      <button id="addBtn">Add</button>
+    </div>
+
+    <footer>
+      Tip: Add this to your Home Screen for quick launching. The timer is timestamp‑based, so it stays accurate even if your phone sleeps.
+    </footer>
+  </div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const appEl=$('#app');
+  const grid=$('#grid');
+  const remainingEl=$('#remaining');
+  const trackedEl=$('#tracked');
+  const todayStrEl=$('#todayStr');
+  const budgetEl=$('#budget');
+  const confirmToggle=$('#confirmToggle');
+  const exportBtn=$('#exportBtn');
+  const endDayBtn=$('#endDayBtn');
+  const newActEl=$('#newAct');
+  const addBtn=$('#addBtn');
+
+  const DEFAULTS={
+    budgetHours:16,
+    confirmOnSwitch:true,
+    activities:[
+      'Wake up / Wind down','Shower','Relax','Cardio','Work','Eat','Misc. chores','Workout'
+    ]
+  };
+
+  function dayKey(d=new Date()){
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,'0');
+    const dd=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`
+  }
+  function fmt(ms){
+    const neg=ms<0; ms=Math.abs(ms);
+    const s=Math.floor(ms/1000);
+    const hh=String(Math.floor(s/3600)).padStart(2,'0');
+    const mm=String(Math.floor((s%3600)/60)).padStart(2,'0');
+    const ss=String(s%60).padStart(2,'0');
+    return (neg?'-':'')+`${hh}:${mm}:${ss}`
+  }
+
+  const store={
+    load(){
+      const raw=localStorage.getItem('daytimer:v1');
+      if(!raw){
+        const init={
+          day:dayKey(),
+          budgetHours:DEFAULTS.budgetHours,
+          confirmOnSwitch:DEFAULTS.confirmOnSwitch,
+          activities:Object.fromEntries(DEFAULTS.activities.map(n=>[n,{accumMs:0}])),
+          running:null, // {name,startTs}
+          history:[]
+        };
+        localStorage.setItem('daytimer:v1',JSON.stringify(init));
+        return init;
+      }
+      try{return JSON.parse(raw)}catch(e){
+        localStorage.removeItem('daytimer:v1');
+        return store.load();
+      }
+    },
+    save(state){
+      localStorage.setItem('daytimer:v1',JSON.stringify(state));
+    }
+  };
+
+  let state=store.load();
+
+  function trackedToday(includeRunning=true){
+    let sum=0; const now=Date.now();
+    for(const [n,rec] of Object.entries(state.activities)){
+      let add=rec.accumMs||0;
+      if(includeRunning && state.running && state.running.name===n){
+        add += now - state.running.startTs;
+      }
+      sum+=add;
+    }
+    return sum;
+  }
+
+  function ensureDay(){
+    const today=dayKey();
+    if(state.day!==today){
+      // Archive yesterday
+      const snapshot={
+        date:state.day,
+        budgetHours:state.budgetHours,
+        totals:Object.fromEntries(Object.entries(state.activities).map(([n,r])=>[n,r.accumMs])),
+        totalMs:trackedToday(true)
+      };
+      state.history.push(snapshot);
+      // Reset for new day
+      state.day=today;
+      for(const rec of Object.values(state.activities)) rec.accumMs=0;
+      state.running=null;
+      store.save(state);
+      alert('New day detected — counters reset.');
+    }
+  }
+
+  function render(){
+    ensureDay();
+    todayStrEl.textContent=new Date().toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
+    budgetEl.value=state.budgetHours;
+    confirmToggle.classList.toggle('on', !!state.confirmOnSwitch);
+
+    // Summary
+    const total=trackedToday(true);
+    const remaining=state.budgetHours*3600_000 - total;
+    trackedEl.textContent=fmt(total);
+    remainingEl.textContent=fmt(remaining);
+    remainingEl.classList.toggle('negative', remaining<0);
+
+    // Activities grid
+    grid.innerHTML='';
+    const entries=Object.entries(state.activities);
+    for(const [name,rec] of entries){
+      const isActive=state.running && state.running.name===name;
+      const tile=document.createElement('div');
+      tile.className='tile'+(isActive?' active':'');
+      tile.innerHTML=`
+        <div class="row">
+          <div class="name">${name}</div>
+          ${isActive?'<span class="pulse" title="Running"></span>':''}
+        </div>
+        <div class="row" style="align-items:center">
+          <div class="elapsed">${fmt(rec.accumMs + (isActive?Date.now()-state.running.startTs:0))}</div>
+          <div class="row" style="gap:6px">
+            <button class="ghost tiny" aria-label="Rename ${name}">Rename</button>
+            <button class="ghost tiny" aria-label="Delete ${name}">Delete</button>
+          </div>
+        </div>
+        <div class="row">
+          <button class="${isActive?'danger':'primary'}" aria-pressed="${isActive}" aria-label="${isActive?'Stop':'Start'} ${name}">${isActive?'Switch away':'Start'}</button>
+        </div>`;
+
+      const [renameBtn, deleteBtn]=tile.querySelectorAll('button.ghost');
+      const actionBtn=tile.querySelector('button.primary, button.danger');
+
+      actionBtn.addEventListener('click',()=>{
+        startActivity(name);
+      });
+      renameBtn.addEventListener('click',()=>{
+        const nn=prompt('Rename activity', name);
+        if(!nn||nn.trim()===name) return;
+        if(state.activities[nn]){alert('An activity with that name already exists.');return;}
+        state.activities[nn]=state.activities[name];
+        delete state.activities[name];
+        if(state.running && state.running.name===name){state.running.name=nn;}
+        store.save(state); render();
+      });
+      deleteBtn.addEventListener('click',()=>{
+        if(state.running && state.running.name===name){
+          alert('Stop or switch away before deleting this activity.');return;
+        }
+        if(!confirm(`Delete “${name}”?`)) return;
+        delete state.activities[name];
+        store.save(state); render();
+      });
+
+      grid.appendChild(tile);
+    }
+  }
+
+  function startActivity(name){
+    ensureDay();
+    const now=Date.now();
+    if(state.running){
+      if(state.running.name===name){
+        // Already running -> do nothing
+        return;
+      }
+      if(state.confirmOnSwitch){
+        const ok=confirm(`Switch from “${state.running.name}” to “${name}”?`);
+        if(!ok) return;
+      }
+      // stop current
+      const cur=state.running;
+      const rec=state.activities[cur.name];
+      if(rec){ rec.accumMs += now - cur.startTs; }
+    }
+    // start new
+    state.running={name, startTs: now};
+    store.save(state);
+    render();
+  }
+
+  function endDay(){
+    ensureDay();
+    const now=Date.now();
+    if(!confirm('End the day and archive totals?')) return;
+    if(state.running){
+      const rec=state.activities[state.running.name];
+      if(rec){ rec.accumMs += now - state.running.startTs; }
+      state.running=null;
+    }
+    const snapshot={
+      date:state.day,
+      budgetHours:state.budgetHours,
+      totals:Object.fromEntries(Object.entries(state.activities).map(([n,r])=>[n,r.accumMs])),
+      totalMs:trackedToday(false)
+    };
+    state.history.push(snapshot);
+    // Reset counters for new day but keep activities
+    state.day=dayKey();
+    for(const r of Object.values(state.activities)) r.accumMs=0;
+    store.save(state);
+    render();
+    alert('Day archived. Counters reset.');
+  }
+
+  function exportCSV(){
+    // Include current day as well (up-to-now totals)
+    const rows=[[
+      'date','budget_hours','activity','ms','h:mm:ss'
+    ]];
+    function pushDay(date,budget,totals){
+      for(const [name,ms] of Object.entries(totals)){
+        rows.push([date,budget,name,ms,fmt(ms)]);
+      }
+    }
+    for(const snap of state.history){
+      pushDay(snap.date,snap.budgetHours,snap.totals);
+    }
+    // Current day snapshot
+    const tempTotals={};
+    for(const [n,r] of Object.entries(state.activities)){
+      tempTotals[n]=r.accumMs + (state.running && state.running.name===n ? Date.now()-state.running.startTs : 0);
+    }
+    pushDay(state.day,state.budgetHours,tempTotals);
+
+    const csv=rows.map(r=>r.map(v=>String(v).includes(',')?`"${String(v).replace(/"/g,'""')}"`:v).join(',')).join('\n');
+    const blob=new Blob([csv],{type:'text/csv'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='day-timer-history.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // Wire UI controls
+  budgetEl.addEventListener('change',()=>{ const v=parseFloat(budgetEl.value)||DEFAULTS.budgetHours; state.budgetHours=Math.max(1,Math.min(24,v)); store.save(state); render(); });
+  confirmToggle.addEventListener('click',()=>{ state.confirmOnSwitch=!state.confirmOnSwitch; store.save(state); render(); });
+  exportBtn.addEventListener('click',exportCSV);
+  endDayBtn.addEventListener('click',endDay);
+  addBtn.addEventListener('click',()=>{
+    const name=(newActEl.value||'').trim(); if(!name) return;
+    if(state.activities[name]){ alert('That activity already exists.'); return; }
+    state.activities[name]={accumMs:0}; newActEl.value=''; store.save(state); render();
+  });
+  newActEl.addEventListener('keydown',e=>{ if(e.key==='Enter'){ addBtn.click(); }});
+
+  // Ticker for live UI updates
+  setInterval(()=>{ render(); },1000);
+
+  // First render
+  render();
+
+  // First‑run hint
+  if(!localStorage.getItem('daytimer:hinted')){
+    setTimeout(()=>{
+      alert('Welcome! Tap an activity (e.g., “Wake up / Wind down”) to start. Starting another will stop the current one — with a confirmation if enabled.');
+      localStorage.setItem('daytimer:hinted','1');
+    },200);
+  }
+})();
+</script>
+</body>
+</html>
